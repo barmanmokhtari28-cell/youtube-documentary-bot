@@ -50,23 +50,49 @@ def translate_to_persian(text):
         print(f"Translation error: {e}")
         return ""
 
-def download_youtube_video(video_url, output_path):
-    print(f"Downloading compressed video from: {video_url}")
+def download_youtube_video(video_url, video_id):
+    output_filename = f"video_{video_id}.mp4"
+    print(f"Downloading and compressing video to: {output_filename}")
+    
     ydl_opts = {
-        # Select best available format that is 360p or lower, fallback to absolute lowest (worst)
-        'format': 'best[height<=360][ext=mp4]/worst[ext=mp4]/worst',
-        'outtmpl': output_path,
-        'merge_output_format': 'mp4',
+        # Limit format to 360p or lower to keep file sizes very small
+        'format': 'bestvideo[height<=360]+bestaudio/best[height<=360]/worst',
+        'outtmpl': f'video_{video_id}.%(ext)s',
+        'recode_video': 'mp4',  # Auto-transcode to MP4 natively via yt-dlp
         'quiet': True,
         'no_warnings': True,
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
-        return output_path
+        
+        # If the file exists directly as .mp4, return it
+        if os.path.exists(output_filename):
+            return output_filename
+            
+        # In case the file downloaded as .webm/.mkv, transcode it manually with ffmpeg
+        for file in os.listdir('.'):
+            if file.startswith(f"video_{video_id}"):
+                if not file.endswith('.mp4'):
+                    import subprocess
+                    print(f"Manually transcoding {file} to MP4 using ffmpeg...")
+                    try:
+                        subprocess.run([
+                            'ffmpeg', '-y', '-i', file,
+                            '-vcodec', 'libx264', '-acodec', 'aac',
+                            '-crf', '28', '-preset', 'veryfast',
+                            output_filename
+                        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        os.remove(file)  # Clean up the original webm/mkv file
+                        return output_filename
+                    except Exception as trans_err:
+                        print(f"Manual transcode failed: {trans_err}")
+                else:
+                    return file
     except Exception as e:
         print(f"yt-dlp download error: {e}")
-        return None
+        
+    return None
 
 def download_thumbnail(video_id):
     urls_to_try = [
@@ -170,9 +196,8 @@ def main():
         RLM = "\u200f"
         safe_hashtag = escaped_channel.replace(" ", "_").replace("–", "").replace("—", "")
 
-        # Try downloading the actual video first
-        video_filename = f"video_{video_id}.mp4"
-        video_path = download_youtube_video(link, video_filename)
+        # Try downloading the actual video, passing video_id directly
+        video_path = download_youtube_video(link, video_id)
         
         video_sent = False
         
@@ -182,7 +207,6 @@ def main():
             
             # Standard Telegram Bot upload limit is strictly 50MB
             if file_size_mb <= 49.5:
-                # Compile RTL formatted caption to assign directly inside the video player
                 caption = (
                     f"{RLM}🎥 <b>مستند جدید کانال {escaped_channel}:</b>\n"
                     f"<blockquote>{RLM}{escaped_translation}</blockquote>\n\n"
@@ -211,7 +235,6 @@ def main():
                 f"<blockquote>{RLM}{escaped_translation}</blockquote>\n\n"
                 f"{RLM}🇺🇸 <i>عنوان اصلی (جهت مشاهده ضربه بزنید):</i>\n"
                 f"<tg-spoiler>{escaped_original}</tg-spoiler>\n\n"
-                f"{RLM}⚠️ <i>حجم این ویدیو بیش از ۵۰ مگابایت بود، برای تماشا از لینک یوتیوب استفاده کنید.</i>\n\n"
                 f"{RLM}🔗 <a href='{escaped_link}'>مشاهده ویدیو در یوتیوب</a>\n\n"
                 f"{RLM}#مستند #{safe_hashtag}\n"
                 f"{RLM}{escaped_username}\n"
@@ -225,7 +248,6 @@ def main():
                 if os.path.exists(thumb_path):
                     os.remove(thumb_path)
         
-        # Standard safety delay to prevent hitting Telegram's flood/rate limit rules
         time.sleep(3)
 
 if __name__ == "__main__":
