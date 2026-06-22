@@ -11,6 +11,9 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    # Grants the required write access to save the sent_videos.txt changes
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout repository
